@@ -1,66 +1,129 @@
 from fastapi import FastAPI
 import requests
 import time
+import uuid
 
 app = FastAPI()
 
-LOGGING_URL = "http://logging-service:8081"
-COUNTER_URL = "http://counter-service:8082"
+LOGGING_SERVICES = [
+    "http://logging1:8081",
+    "http://logging2:8081",
+    "http://logging3:8081"
+]
 
-# метрики
+COUNTER_SERVICE = "http://counter:8082"
+
 logging_time = 0
 counter_time = 0
 
 
+# ----------------------------
+# CREATE TRANSACTION
+# ----------------------------
 @app.post("/transaction")
-def create_transaction(data: dict):
+def transaction(data: dict):
     global logging_time, counter_time
 
-    user_id = data["user_id"]
-    amount = data["amount"]
+    tx_id = str(uuid.uuid4())
 
-    transaction = {
-        "transaction_id": str(time.time()),
-        "user_id": user_id,
-        "amount": amount
+    payload = {
+        "transaction_id": tx_id,
+        "user_id": data["user_id"],
+        "amount": data["amount"]
     }
 
-    # logging-service
+    # ----------------------------
+    # LOGGING (FAILSAFE)
+    # ----------------------------
     start = time.time()
-    requests.post(f"{LOGGING_URL}/log", json=transaction)
+
+    log_success = False
+    for service in LOGGING_SERVICES:
+        try:
+            requests.post(
+                f"{service}/log",
+                json=payload,
+                timeout=2
+            )
+            log_success = True
+            break
+        except Exception:
+            continue
+
     logging_time += time.time() - start
 
-    # counter-service
+    # ----------------------------
+    # COUNTER SERVICE
+    # ----------------------------
     start = time.time()
-    response = requests.post(f"{COUNTER_URL}/update", json=transaction)
+
+    try:
+        res = requests.post(
+            f"{COUNTER_SERVICE}/update",
+            json=payload,
+            timeout=2
+        )
+        balance = res.json().get("balance")
+    except Exception:
+        balance = None
+
     counter_time += time.time() - start
 
-    balance = response.json()["balance"]
-
     return {
-        "transaction_id": transaction["transaction_id"],
-        "balance": balance
+        "transaction_id": tx_id,
+        "balance": balance,
+        "logging_saved": log_success
     }
 
 
-@app.get("/user/{user_id}")
-def get_user(user_id: int):
-    balance = requests.get(f"{COUNTER_URL}/balance/{user_id}").json()
-    transactions = requests.get(f"{LOGGING_URL}/transactions/{user_id}").json()
+# ----------------------------
+# GET TRANSACTIONS (FAILSAFE)
+# ----------------------------
+@app.get("/transactions/{user_id}")
+def get_transactions(user_id: int):
+    last_error = None
+
+    for service in LOGGING_SERVICES:
+        try:
+            res = requests.get(
+                f"{service}/transactions/{user_id}",
+                timeout=2
+            )
+            return res.json()
+        except Exception as e:
+            last_error = str(e)
+            continue
 
     return {
-        "balance": balance["balance"],
-        "transactions": transactions
+        "transactions": [],
+        "error": "All logging services are down",
+        "details": last_error
     }
 
 
+# ----------------------------
+# GET ACCOUNTS
+# ----------------------------
 @app.get("/accounts")
-def get_accounts():
-    return requests.get(f"{COUNTER_URL}/balances").json()
+def accounts():
+    try:
+        res = requests.get(
+            f"{COUNTER_SERVICE}/accounts",
+            timeout=2
+        )
+        return res.json()
+    except Exception as e:
+        return {
+            "error": "Counter service unavailable",
+            "details": str(e)
+        }
 
 
+# ----------------------------
+# METRICS
+# ----------------------------
 @app.get("/metrics")
-def get_metrics():
+def metrics():
     return {
         "logging_time": logging_time,
         "counter_time": counter_time

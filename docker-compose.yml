@@ -1,20 +1,101 @@
-version: '3.8'
+version: "3.8"
 
 services:
-  facade-service:
+
+  facade:
     build: ./facade-service
+    container_name: facade
     ports:
       - "8080:8080"
+    environment:
+      COUNTER_URL: http://counter:8082
+      LOGGING1_URL: http://logging1:8081
+      LOGGING2_URL: http://logging2:8081
+      LOGGING3_URL: http://logging3:8081
     depends_on:
-      - logging-service
-      - counter-service
+      - counter
+      - logging1
+      - logging2
+      - logging3
 
-  logging-service:
-    build: ./logging-service
-    ports:
-      - "8081:8081"
-
-  counter-service:
+  counter:
     build: ./counter-service
+    container_name: counter
     ports:
       - "8082:8082"
+    environment:
+      DB_HOST: postgres
+      DB_NAME: bank
+      DB_USER: user
+      DB_PASSWORD: password
+      DB_PORT: 5432
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  logging1:
+    build: ./logging-service
+    container_name: logging1
+    environment:
+      HAZELCAST_CLUSTER_NAME: dev
+      HAZELCAST_MEMBERS: hazelcast1,hazelcast2,hazelcast3
+    depends_on:
+      - hazelcast1
+      - hazelcast2
+      - hazelcast3
+
+  logging2:
+    build: ./logging-service
+    container_name: logging2
+    environment:
+      HAZELCAST_CLUSTER_NAME: dev
+      HAZELCAST_MEMBERS: hazelcast1,hazelcast2,hazelcast3
+    depends_on:
+      - hazelcast1
+      - hazelcast2
+      - hazelcast3
+
+  logging3:
+    build: ./logging-service
+    container_name: logging3
+    environment:
+      HAZELCAST_CLUSTER_NAME: dev
+      HAZELCAST_MEMBERS: hazelcast1,hazelcast2,hazelcast3
+    depends_on:
+      - hazelcast1
+      - hazelcast2
+      - hazelcast3
+
+  postgres:
+    image: postgres:15
+    container_name: postgres
+    restart: always
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: bank
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d bank"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  hazelcast1:
+    image: hazelcast/hazelcast
+    container_name: hazelcast1
+    environment:
+      - HZ_CLUSTERNAME=dev
+
+  hazelcast2:
+    image: hazelcast/hazelcast
+    container_name: hazelcast2
+    environment:
+      - HZ_CLUSTERNAME=dev
+
+  hazelcast3:
+    image: hazelcast/hazelcast
+    container_name: hazelcast3
+    environment:
+      - HZ_CLUSTERNAME=dev

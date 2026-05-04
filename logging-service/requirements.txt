@@ -1,2 +1,5 @@
 fastapi
 uvicorn
+requests
+psycopg2-binary
+hazelcast-python-client

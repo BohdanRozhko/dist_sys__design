@@ -4,43 +4,34 @@ from concurrent.futures import ThreadPoolExecutor
 
 BASE_URL = "http://localhost:8080/transaction"
 
+# можна міняти під час запуску
 CLIENTS = 10
 REQUESTS_PER_CLIENT = 10000
 
 
-# метрики
-logging_times = []
-counter_times = []
-
-
-def send_requests_same_user(user_id):
-    global logging_times, counter_times
-
-    for _ in range(REQUESTS_PER_CLIENT):
-        start = time.time()
-
+def send_requests(user_id, requests_count):
+    for _ in range(requests_count):
         requests.post(BASE_URL, json={
             "user_id": user_id,
             "amount": 1
         })
 
-        end = time.time()
 
-    return
+def run_scenario_1(clients, requests_per_client):
+    print(f"\n=== SCENARIO 1: {clients} users, separate accounts ===")
 
+    start = time.time()
 
-def run_scenario_1():
-    print("\n=== SCENARIO 1: 10 users, separate accounts ===")
+    with ThreadPoolExecutor(max_workers=clients) as executor:
+        executor.map(
+            lambda uid: send_requests(uid, requests_per_client),
+            range(1, clients + 1)
+        )
 
-    start_total = time.time()
+    end = time.time()
 
-    with ThreadPoolExecutor(max_workers=CLIENTS) as executor:
-        executor.map(send_requests_same_user, range(1, 11))
-
-    end_total = time.time()
-
-    total_time = end_total - start_total
-    total_requests = CLIENTS * REQUESTS_PER_CLIENT
+    total_requests = clients * requests_per_client
+    total_time = end - start
     rps = total_requests / total_time
 
     print("\nRESULTS SCENARIO 1")
@@ -49,18 +40,21 @@ def run_scenario_1():
     print("Requests/sec:", rps)
 
 
-def run_scenario_2():
-    print("\n=== SCENARIO 2: 10 users, same account ===")
+def run_scenario_2(clients, requests_per_client):
+    print(f"\n=== SCENARIO 2: {clients} users, same account ===")
 
-    start_total = time.time()
+    start = time.time()
 
-    with ThreadPoolExecutor(max_workers=CLIENTS) as executor:
-        executor.map(lambda _: send_requests_same_user(1), range(10))
+    with ThreadPoolExecutor(max_workers=clients) as executor:
+        executor.map(
+            lambda _: send_requests(1, requests_per_client),
+            range(clients)
+        )
 
-    end_total = time.time()
+    end = time.time()
 
-    total_time = end_total - start_total
-    total_requests = CLIENTS * REQUESTS_PER_CLIENT
+    total_requests = clients * requests_per_client
+    total_time = end - start
     rps = total_requests / total_time
 
     print("\nRESULTS SCENARIO 2")
@@ -77,7 +71,7 @@ def check_final_state():
 
 
 def get_facade_metrics():
-    print("\n=== SERVICE CONTRIBUTION (from facade) ===")
+    print("\n=== SERVICE CONTRIBUTION ===")
 
     metrics = requests.get("http://localhost:8080/metrics").json()
 
@@ -86,8 +80,11 @@ def get_facade_metrics():
 
 
 if __name__ == "__main__":
-    run_scenario_1()
-    run_scenario_2()
+    clients = 10
+    requests_per_client = 10000
+
+    run_scenario_1(clients, requests_per_client)
+    run_scenario_2(clients, requests_per_client)
 
     check_final_state()
     get_facade_metrics()

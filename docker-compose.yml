@@ -1,0 +1,164 @@
+version: "3.8"
+
+services:
+
+  # ─────────────────── CONFIG SERVER ───────────────────────────────────────
+  config-server:
+    build: ./config-server
+    container_name: config-server
+    ports:
+      - "8000:8000"
+    networks:
+      - micro-net
+
+
+  # ─────────────────── HAZELCAST CLUSTER (3 nodes) ─────────────────────────
+  hazelcast1:
+    image: hazelcast/hazelcast:5.5
+    container_name: hazelcast1
+    environment:
+      - HZ_CLUSTERNAME=dev
+    ports:
+      - "5701:5701"
+    networks:
+      - micro-net
+
+  hazelcast2:
+    image: hazelcast/hazelcast:5.5
+    container_name: hazelcast2
+    environment:
+      - HZ_CLUSTERNAME=dev
+    ports:
+      - "5702:5701"
+    networks:
+      - micro-net
+
+  hazelcast3:
+    image: hazelcast/hazelcast:5.5
+    container_name: hazelcast3
+    environment:
+      - HZ_CLUSTERNAME=dev
+    ports:
+      - "5703:5701"
+    networks:
+      - micro-net
+
+
+  # ─────────────────── POSTGRES ─────────────────────────────────────────────
+  postgres:
+    image: postgres:15
+    container_name: postgres
+    restart: always
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: bank
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d bank"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - micro-net
+
+
+  # ─────────────────── LOGGING SERVICES (3 instances) ──────────────────────
+  logging1:
+    build: ./logging-service
+    container_name: logging1
+    ports:
+      - "8081:8081"
+    environment:
+      CONFIG_URL: http://config-server:8000
+    depends_on:
+      - config-server
+      - hazelcast1
+      - hazelcast2
+      - hazelcast3
+    networks:
+      - micro-net
+
+  logging2:
+    build: ./logging-service
+    container_name: logging2
+    ports:
+      - "8083:8081"
+    environment:
+      CONFIG_URL: http://config-server:8000
+    depends_on:
+      - config-server
+      - hazelcast1
+      - hazelcast2
+      - hazelcast3
+    networks:
+      - micro-net
+
+  logging3:
+    build: ./logging-service
+    container_name: logging3
+    ports:
+      - "8084:8081"
+    environment:
+      CONFIG_URL: http://config-server:8000
+    depends_on:
+      - config-server
+      - hazelcast1
+      - hazelcast2
+      - hazelcast3
+    networks:
+      - micro-net
+
+
+  # ─────────────────── COUNTER SERVICE (consumer) ──────────────────────────
+  counter:
+    build: ./counter-service
+    container_name: counter
+    ports:
+      - "8082:8082"
+    environment:
+      DB_HOST: postgres
+      DB_NAME: bank
+      DB_USER: user
+      DB_PASSWORD: password
+      CONFIG_URL: http://config-server:8000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      config-server:
+        condition: service_started
+      hazelcast1:
+        condition: service_started
+      hazelcast2:
+        condition: service_started
+      hazelcast3:
+        condition: service_started
+    networks:
+      - micro-net
+
+
+  # ─────────────────── FACADE SERVICE (producer) ───────────────────────────
+  facade:
+    build: ./facade-service
+    container_name: facade
+    ports:
+      - "8080:8080"
+    environment:
+      CONFIG_URL: http://config-server:8000
+    depends_on:
+      - config-server
+      - hazelcast1
+      - hazelcast2
+      - hazelcast3
+      - logging1
+      - logging2
+      - logging3
+      - counter
+    networks:
+      - micro-net
+
+
+networks:
+  micro-net:
+    driver: bridge

@@ -1,0 +1,190 @@
+version: "3.8"
+
+services:
+
+  # ─── CONSUL (Service Registry + Config KV) ────────────────────────────────
+  consul:
+    image: hashicorp/consul:1.18
+    container_name: consul
+    command: >
+      agent -server -bootstrap-expect=1
+      -ui -client=0.0.0.0
+      -advertise=consul
+    ports:
+      - "8500:8500"   # HTTP API + UI
+      - "8600:8600/udp"  # DNS
+    networks:
+      - micro-net
+    healthcheck:
+      test: ["CMD", "consul", "members"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ─── Consul KV initializer (runs once, seeds config values) ───────────────
+  consul-init:
+    image: curlimages/curl:8.6.0
+    container_name: consul-init
+    depends_on:
+      consul:
+        condition: service_healthy
+    networks:
+      - micro-net
+    volumes:
+      - ./consul-init.sh:/consul-init.sh:ro
+    entrypoint: ["sh", "/consul-init.sh"]
+    restart: "no"
+
+
+  # ─── HAZELCAST CLUSTER (3 nodes) ──────────────────────────────────────────
+  hazelcast1:
+    image: hazelcast/hazelcast:5.5
+    container_name: hazelcast1
+    environment:
+      - HZ_CLUSTERNAME=dev
+    ports:
+      - "5701:5701"
+    networks:
+      - micro-net
+
+  hazelcast2:
+    image: hazelcast/hazelcast:5.5
+    container_name: hazelcast2
+    environment:
+      - HZ_CLUSTERNAME=dev
+    ports:
+      - "5702:5701"
+    networks:
+      - micro-net
+
+  hazelcast3:
+    image: hazelcast/hazelcast:5.5
+    container_name: hazelcast3
+    environment:
+      - HZ_CLUSTERNAME=dev
+    ports:
+      - "5703:5701"
+    networks:
+      - micro-net
+
+
+  # ─── POSTGRES ─────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:15
+    container_name: postgres
+    restart: always
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: bank
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d bank"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - micro-net
+
+
+  # ─── LOGGING SERVICES (3 instances) ───────────────────────────────────────
+  logging1:
+    build: ./logging-service
+    container_name: logging1
+    environment:
+      CONSUL_HOST: consul
+      CONSUL_PORT: 8500
+      SERVICE_PORT: 8081
+    ports:
+      - "8081:8081"
+    depends_on:
+      consul:
+        condition: service_healthy
+      consul-init:
+        condition: service_completed_successfully
+    networks:
+      - micro-net
+
+  logging2:
+    build: ./logging-service
+    container_name: logging2
+    environment:
+      CONSUL_HOST: consul
+      CONSUL_PORT: 8500
+      SERVICE_PORT: 8081
+    ports:
+      - "8083:8081"
+    depends_on:
+      consul:
+        condition: service_healthy
+      consul-init:
+        condition: service_completed_successfully
+    networks:
+      - micro-net
+
+  logging3:
+    build: ./logging-service
+    container_name: logging3
+    environment:
+      CONSUL_HOST: consul
+      CONSUL_PORT: 8500
+      SERVICE_PORT: 8081
+    ports:
+      - "8084:8081"
+    depends_on:
+      consul:
+        condition: service_healthy
+      consul-init:
+        condition: service_completed_successfully
+    networks:
+      - micro-net
+
+
+  # ─── COUNTER SERVICE ──────────────────────────────────────────────────────
+  counter:
+    build: ./counter-service
+    container_name: counter
+    environment:
+      CONSUL_HOST: consul
+      CONSUL_PORT: 8500
+      SERVICE_PORT: 8082
+      DB_HOST: postgres
+      DB_NAME: bank
+      DB_USER: user
+      DB_PASSWORD: password
+    ports:
+      - "8082:8082"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      consul:
+        condition: service_healthy
+      consul-init:
+        condition: service_completed_successfully
+    networks:
+      - micro-net
+
+
+  # ─── FACADE SERVICE ───────────────────────────────────────────────────────
+  facade:
+    build: ./facade-service
+    container_name: facade
+    environment:
+      CONSUL_HOST: consul
+      CONSUL_PORT: 8500
+      SERVICE_PORT: 8080
+    ports:
+      - "8080:8080"
+    depends_on:
+      consul:
+        condition: service_healthy
+      consul-init:
+        condition: service_completed_successfully
+    networks:
+      - micro-net
+
+
+networks:
+  micro-net:
+    driver: bridge
